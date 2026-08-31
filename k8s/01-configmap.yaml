@@ -1,0 +1,10 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: api-config
+data:
+  PORT: "8000"
+  PGHOST: todo-db.cl4wyoi28bez.ap-south-1.rds.amazonaws.com
+  PGPORT: "5432"
+  PGDATABASE: appdb
+  PGSSL: "true"

@@ -1,0 +1,19 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: migrate
+spec:
+  backoffLimit: 3
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: migrate
+          image: localhost:5000/todo-server:latest
+          imagePullPolicy: Always
+          command: ["npm", "run", "migrate"]
+          envFrom:
+            - configMapRef:
+                name: api-config
+            - secretRef:
+                name: db-credentials
