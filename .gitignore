@@ -1,6 +1,0 @@
-
-# Phase 1 AWS resource IDs (generated, environment-specific)
-infra/phase1/ids.env
-
-# SSH private keys — never commit
-*.pem
