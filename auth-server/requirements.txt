@@ -1,0 +1,27 @@
+# Web framework + request/response validation. Also generates the OpenAPI spec
+# served at /openapi.json and the Swagger UI at /docs.
+fastapi==0.115.6
+
+# ASGI server that actually runs the app ("uvicorn app.main:app").
+# [standard] adds the file-watcher used by --reload.
+uvicorn[standard]==0.34.0
+
+# Postgres driver (psycopg 3). [binary] ships prebuilt wheels so there is no
+# need for a local libpq / C compiler.
+psycopg[binary]==3.2.3
+
+# Async connection pool for psycopg - see app/db/pool.py.
+psycopg-pool==3.2.4
+
+# Schema models used by FastAPI (app/schemas.py). [email] pulls in
+# email-validator, which is what makes EmailStr work.
+pydantic[email]==2.10.4
+
+# JWT creation and verification - the access token issued on login.
+PyJWT==2.10.1
+
+# Password hashing. Never stores the plain password.
+bcrypt==4.2.1
+
+# Loads the .env file into os.environ at startup - see app/config.py.
+python-dotenv==1.0.1

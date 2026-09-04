@@ -1,0 +1,28 @@
+{
+  "name": "shorten-url",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Runs ui, auth-server and short-server together, locally, without Docker.",
+  "scripts": {
+    "setup": "npm run setup:auth && npm run setup:short && npm run setup:ui",
+    "setup:auth": "node scripts/venv-python.mjs -m pip install -r requirements.txt",
+    "setup:venv": "cd auth-server && python -m venv .venv",
+    "setup:short": "npm install --prefix short-server",
+    "setup:ui": "npm install --prefix ui",
+
+    "dev": "concurrently -k -n auth,short,ui -c magenta,cyan,green \"npm:dev:auth\" \"npm:dev:short\" \"npm:dev:ui\"",
+    "dev:auth": "node scripts/venv-python.mjs -m uvicorn app.main:app --reload --port 4000",
+    "dev:short": "cd short-server && npm run dev",
+    "dev:ui": "cd ui && npm run dev",
+
+    "build": "cd short-server && npm run build && cd ../ui && npm run build",
+
+    "start": "concurrently -k -n auth,short,ui -c magenta,cyan,green \"npm:start:auth\" \"npm:start:short\" \"npm:start:ui\"",
+    "start:auth": "node scripts/venv-python.mjs -m uvicorn app.main:app --port 4000",
+    "start:short": "cd short-server && npm start",
+    "start:ui": "cd ui && npm run preview"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}
