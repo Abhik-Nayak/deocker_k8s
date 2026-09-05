@@ -54,15 +54,48 @@ shared session store, no network hop between them.
 
 STEP 1
 Create Docker Image for each service
+docker build -t shorten-ui ./ui
+docker build -t shorten-auth ./auth-server
+docker build -t shorten-server ./short-server
+docker images
         ↓
 STEP 2
 Run each Image as a Container
+docker run -d --name shorten-ui-container -p 80:3000 shorten-ui
+docker run -d --name shorten-auth-container -p 4000:4000 --env-file .\auth-server\.env shorten-auth    
+docker run -d --name shorten-server-container -p 5000:5000 --env-file .\short-server\.env shorten-server
+
+docker logs shorten-ui-container
         ↓
 STEP 3
 Connect Containers using Docker Network
+docker network create shorten-network
+docker network connect shorten-network shorten-ui-container 
+docker network connect shorten-network shorten-auth-container 
+docker network connect shorten-network shorten-server-container 
+
+docker network ls
+docker network rm ---------
         ↓
 STEP 4
 Apply Docker Compose
+
+Instead of running:
+docker build
+docker run
+docker network create
+docker network connect
+
+manually, Compose will manage:
+3 services
+   +
+3 containers
+   +
+1 network
+   +
+ports
+   +
+environment files
         ↓
 STEP 5
 Verify complete applicationl
