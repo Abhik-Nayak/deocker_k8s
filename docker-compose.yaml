@@ -1,0 +1,38 @@
+services:
+
+  ui:
+    build:
+      context: ./ui
+    container_name: shortener-ui-container
+    ports:
+      - "80:3000"
+    depends_on:
+      - auth-server
+      - short-server
+    networks:
+      - shorten-network
+    
+  auth-server:
+    build: 
+      context: ./auth-server
+    container_name: shortener-auth-container
+    ports:
+      - "4000:4000"
+    env_file:
+      - ./auth-server/.env
+    networks:
+      - shorten-network
+
+  short-server:
+    build:
+      context: ./short-server
+    container_name: shortener-short-container
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./short-server/.env
+    networks:
+      - shorten-network
+networks:
+  shorten-network:
+    driver: bridge

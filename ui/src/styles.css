@@ -1,12 +1,13 @@
 :root {
-  --bg: #f6f7f9;
-  --card: #ffffff;
-  --text: #1a1d21;
-  --muted: #6b7280;
-  --border: #e3e6ea;
-  --accent: #2563eb;
-  --error: #dc2626;
-  color-scheme: light;
+  --bg: #0d1117;
+  --card: #161b22;
+  --input: #0b0f14;
+  --text: #e6edf3;
+  --muted: #8b949e;
+  --border: #2a313a;
+  --accent: #4c8dff;
+  --error: #f87171;
+  color-scheme: dark;
 }
 
 * {
@@ -74,7 +75,7 @@ input {
   border: 1px solid var(--border);
   border-radius: 8px;
   font: inherit;
-  background: #fff;
+  background: var(--input);
   color: inherit;
 }
 
@@ -88,7 +89,7 @@ button {
   border: 0;
   border-radius: 8px;
   background: var(--accent);
-  color: #fff;
+  color: #0d1117;
   font: inherit;
   font-weight: 500;
   cursor: pointer;
