@@ -2,6 +2,10 @@
 
 A small URL shortener split into three services.
 
+> **This branch is the Kubernetes track.** The learning plan lives in
+> [K8S_ROADMAP.md](K8S_ROADMAP.md); current state in [progress.md](progress.md).
+> Docker fundamentals and the ECS Fargate track are on `only_docker_practice`.
+
 | Service        | Stack                              | Port | Owns table |
 | -------------- | ---------------------------------- | ---- | ---------- |
 | `ui`           | React + Vite                       | 3000 | —          |
@@ -27,22 +31,27 @@ be recognised by the shortener.
 
 ## Database
 
-Both services point at the same Supabase database and each creates its own table
-on startup (`CREATE TABLE IF NOT EXISTS`, from `schema.sql`) — there is no
+Both services point at the **same** Postgres database, and each creates its own
+table on startup (`CREATE TABLE IF NOT EXISTS`, from `schema.sql`) — there is no
 migration step to run.
 
 - [auth-server/app/db/schema.sql](auth-server/app/db/schema.sql) → `users`
 - [short-server/src/db/schema.sql](short-server/src/db/schema.sql) → `links`
 
-Connection string (already in both `.env.example` files — fill in the password):
+**There is no database provisioned in this repo.** The Supabase project and the
+RDS instance used earlier are both gone, so you have to supply one and set
+`DATABASE_URL` in both services. For local work, a container is enough:
+
+```powershell
+docker run -d --name shorten-pg -p 5432:5432 -e POSTGRES_PASSWORD=postgres postgres:17-alpine
+```
 
 ```
-postgresql://postgres:[YOUR-PASSWORD]@db.mgrekulpuebuyrvtvgpu.supabase.co:5432/postgres
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
 ```
 
-> If that host does not resolve, your network is likely IPv4-only while the
-> Supabase direct connection is IPv6. Use the connection **pooler** string from
-> the Supabase dashboard (`...pooler.supabase.com:6543`) instead.
+On the Kubernetes track this becomes an in-cluster StatefulSet in Stage 1 and
+RDS in Stage 2 — see [K8S_ROADMAP.md](K8S_ROADMAP.md).
 
 ## Prerequisites
 
@@ -81,7 +90,7 @@ cd auth-server
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-copy .env.example .env      # then put your Supabase password in DATABASE_URL
+copy .env.example .env      # then point DATABASE_URL at your Postgres
 uvicorn app.main:app --reload --port 4000
 ```
 
@@ -92,7 +101,7 @@ Interactive API docs: http://localhost:4000/docs
 ```powershell
 cd short-server
 npm install
-copy .env.example .env      # same password, same JWT_SECRET as auth-server
+copy .env.example .env      # same DATABASE_URL, same JWT_SECRET as auth-server
 npm run dev
 ```
 
@@ -164,7 +173,7 @@ appear in a history.
 `auth-server/.env`
 
 ```
-DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.mgrekulpuebuyrvtvgpu.supabase.co:5432/postgres?sslmode=require
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
 JWT_SECRET=super-secret-change-me
 JWT_EXPIRES_MINUTES=1440
 ```
@@ -172,11 +181,13 @@ JWT_EXPIRES_MINUTES=1440
 `short-server/.env`
 
 ```
-DATABASE_URL=postgresql://postgres:[YOUR-PASSWORD]@db.mgrekulpuebuyrvtvgpu.supabase.co:5432/postgres
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/postgres
 JWT_SECRET=super-secret-change-me
 PORT=5000
 PUBLIC_BASE_URL=http://localhost:5000
 ```
+
+Add `?sslmode=require` to both URLs for any managed/remote Postgres.
 
 `ui/.env` (optional — these are the defaults)
 
