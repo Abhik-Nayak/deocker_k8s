@@ -5,12 +5,17 @@ import { Pool } from "pg";
 import { config } from "../config";
 
 const url = new URL(config.databaseUrl);
-const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+// const isLocal = url.hostname === "localhost" || url.hostname === "127.0.0.1";
+const sslDisabled = url.searchParams.get("sslmode") === "disable";
 
 export const pool = new Pool({
   connectionString: config.databaseUrl,
   // Managed Postgres (Supabase et al.) requires TLS; local Postgres usually has none.
-  ssl: isLocal ? undefined : { rejectUnauthorized: false },
+  // ssl: isLocal ? undefined : { rejectUnauthorized: false },
+  // after
+  // TLS by default; opt out with ?sslmode=disable for plaintext Postgres
+  // (local container, in-cluster StatefulSet).
+  ssl: sslDisabled ? undefined : { rejectUnauthorized: false },
 });
 
 /** host:port/dbname of the configured URL, without the credentials. */
