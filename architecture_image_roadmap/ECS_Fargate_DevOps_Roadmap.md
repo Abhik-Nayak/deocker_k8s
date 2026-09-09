@@ -58,7 +58,7 @@ The final AWS architecture will use:
 | Local Docker Compose | AWS |
 |---|---|
 | `shorten-network` bridge | VPC + Security Groups + ECS networking |
-| Port mappings such as `80:3000`, `4000:4000` | ALB listeners/rules + target groups |
+| Port mappings such as `80:3000`, `4000:4000`, `5000:5000` | ALB listeners/rules + target groups |
 | `.env` files | SSM Parameter Store / Secrets Manager |
 | Locally built Docker images | Amazon ECR |
 | `docker logs` / container stdout | CloudWatch Logs |
@@ -191,23 +191,28 @@ Example:
 
 | Service | Container Port | Public? | Database? |
 |---|---:|---|---|
-| UI | 80 | Yes | No |
+| UI | 3000 | Yes | No |
 | Auth | 4000 | No | Yes |
-| Short | 4000 | No | Yes |
+| Short | 5000 | No | Yes |
 | PostgreSQL | 5432 | No | — |
+
+Container port is what the process listens on *inside* the container. This is the
+value an ECS task definition and target group need. It is not the host port from
+`docker-compose.yaml`: the UI publishes `80:3000`, so it is port 80 on your laptop
+but port 3000 to ECS.
 
 Understand:
 
 ```text
 UI
- └── Port 80
+ └── Port 3000
 
 auth-server
  └── Port 4000
  └── PostgreSQL
 
 short-server
- └── Port 4000
+ └── Port 5000
  └── PostgreSQL
 
 postgres
@@ -348,6 +353,41 @@ AWS
 └── CloudWatch
 ```
 
+And the supporting infrastructure:
+```
+AWS
+│
+├── VPC
+│
+├── Public Subnets
+│   ├── AZ-A
+│   └── AZ-B
+│
+├── Private Subnets
+│   ├── AZ-A
+│   └── AZ-B
+│
+├── Internet Gateway
+│
+├── NAT Gateway
+│
+├── Route Tables
+│
+├── Security Groups
+│
+├── ECR
+│
+├── ECS Cluster
+│
+├── ALB
+│
+├── RDS
+│
+├── SSM
+│
+└── CloudWatch
+```
+
 ---
 
 # PHASE 3 — Amazon ECR
@@ -473,7 +513,7 @@ Image:
 ECR/short-server:a1b2c3d
 
 Container Port:
-4000
+5000
 
 CPU:
 0.5 vCPU

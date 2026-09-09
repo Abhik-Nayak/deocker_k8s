@@ -1,0 +1,1717 @@
+# PHASE 2 — AWS Infrastructure Manual Setup
+
+## 🎯 Phase 2 Goal
+
+At the end of Phase 2, you should have this foundation:
+
+```text
+                         INTERNET
+                             │
+                    ┌────────▼────────┐
+                    │       ALB       │
+                    │  Public Subnet  │
+                    └────────┬────────┘
+                             │
+                    ┌────────▼────────┐
+                    │ ECS Fargate     │
+                    │ Private Subnet  │
+                    └────────┬────────┘
+                             │
+                       later phase
+                             │
+                    ┌────────▼────────┐
+                    │ RDS PostgreSQL  │
+                    │ Private Subnet  │
+                    └─────────────────┘
+```
+
+Supporting infrastructure:
+
+```text
+AWS
+│
+├── VPC
+├── Public Subnets
+│   ├── AZ-A
+│   └── AZ-B
+├── Private Subnets
+│   ├── AZ-A
+│   └── AZ-B
+├── Internet Gateway
+├── NAT Gateway
+├── Route Tables
+├── Security Groups
+├── ECR
+├── ECS Cluster
+├── ALB
+├── RDS
+├── SSM
+└── CloudWatch
+```
+
+---
+
+# PART 0 — AWS Preparation
+
+## Step 0.1 — Select AWS Region
+
+Use:
+
+```text
+ap-south-1
+Mumbai
+```
+
+Keep all resources in the same region:
+
+```text
+VPC              ap-south-1
+ECR              ap-south-1
+ECS              ap-south-1
+ALB              ap-south-1
+RDS              ap-south-1
+CloudWatch       ap-south-1
+SSM              ap-south-1
+```
+
+---
+
+# PART 1 — Create the VPC
+
+AWS Console:
+
+```text
+AWS Console
+   ↓
+VPC
+   ↓
+Your VPCs
+   ↓
+Create VPC
+```
+
+Choose:
+
+```text
+Resources to create:
+VPC only
+
+Name:
+dev-microservices-vpc
+
+IPv4 CIDR:
+10.0.0.0/16
+```
+
+Think of VPC as your private AWS network.
+
+---
+
+# PART 2 — Create Availability Zones
+
+Use two AZs:
+
+```text
+ap-south-1a
+ap-south-1b
+```
+
+Architecture:
+
+```text
+                VPC
+                 │
+       ┌─────────┴─────────┐
+       │                   │
+     AZ-A                AZ-B
+```
+
+---
+
+# PART 3 — Create Public Subnets
+
+## Public Subnet A
+
+```text
+Name:
+dev-public-subnet-a
+
+AZ:
+ap-south-1a
+
+CIDR:
+10.0.1.0/24
+```
+
+## Public Subnet B
+
+```text
+Name:
+dev-public-subnet-b
+
+AZ:
+ap-south-1b
+
+CIDR:
+10.0.2.0/24
+```
+
+Result:
+
+```text
+VPC 10.0.0.0/16
+│
+├── Public-A
+│   └── 10.0.1.0/24
+│
+└── Public-B
+    └── 10.0.2.0/24
+```
+
+---
+
+# PART 4 — Create Private Subnets
+
+## Private A
+
+```text
+Name:
+dev-private-subnet-a
+
+AZ:
+ap-south-1a
+
+CIDR:
+10.0.11.0/24
+```
+
+## Private B
+
+```text
+Name:
+dev-private-subnet-b
+
+AZ:
+ap-south-1b
+
+CIDR:
+10.0.12.0/24
+```
+
+Final:
+
+```text
+VPC 10.0.0.0/16
+│
+├── Public
+│   ├── 10.0.1.0/24
+│   └── 10.0.2.0/24
+│
+└── Private
+    ├── 10.0.11.0/24
+    └── 10.0.12.0/24
+```
+
+---
+
+# PART 5 — Internet Gateway
+
+Go to:
+
+```text
+VPC
+ ↓
+Internet Gateways
+ ↓
+Create Internet Gateway
+```
+
+Name:
+
+```text
+dev-igw
+```
+
+Then attach it to:
+
+```text
+dev-microservices-vpc
+```
+
+Architecture:
+
+```text
+Internet
+   │
+   ▼
+Internet Gateway
+   │
+   ▼
+VPC
+```
+
+---
+
+# PART 6 — Public Route Table
+
+Create:
+
+```text
+dev-public-rt
+```
+
+Associate:
+
+```text
+Public-A
+Public-B
+```
+
+Add route:
+
+```text
+Destination:
+0.0.0.0/0
+
+Target:
+dev-igw
+```
+
+Flow:
+
+```text
+Public Subnet
+      │
+      ▼
+Public Route Table
+      │
+      ▼
+0.0.0.0/0
+      │
+      ▼
+Internet Gateway
+      │
+      ▼
+Internet
+```
+
+---
+
+# PART 7 — NAT Gateway
+
+Create a NAT Gateway in a public subnet.
+
+Use:
+
+```text
+Name:
+dev-nat-gateway
+
+Subnet:
+Public-A
+```
+
+Allocate an Elastic IP.
+
+Purpose:
+
+```text
+Private ECS
+     │
+     ▼
+Private Route Table
+     │
+     ▼
+NAT Gateway
+     │
+     ▼
+Internet Gateway
+     │
+     ▼
+Internet
+```
+
+But:
+
+```text
+Internet
+   X
+   │
+   X
+Private ECS
+```
+
+The private ECS tasks can make outbound connections without being directly reachable from the internet.
+
+---
+
+# PART 8 — Private Route Tables
+
+Create:
+
+```text
+dev-private-rt-a
+dev-private-rt-b
+```
+
+Associate:
+
+```text
+dev-private-rt-a → Private-A
+dev-private-rt-b → Private-B
+```
+
+Add:
+
+```text
+Destination:
+0.0.0.0/0
+
+Target:
+NAT Gateway
+```
+
+Architecture:
+
+```text
+                 INTERNET
+                     │
+                     ▼
+              Internet Gateway
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+       Public                Public
+          │                     │
+          └──────────┬──────────┘
+                     │
+                NAT Gateway
+                     │
+          ┌──────────┴──────────┐
+          │                     │
+      Private-A             Private-B
+```
+
+---
+
+# PART 9 — Create Security Groups
+
+Create three Security Groups:
+
+```text
+ALB SG
+   ↓
+ECS SG
+   ↓
+RDS SG
+```
+
+## SG 1 — ALB Security Group
+
+Name:
+
+```text
+dev-alb-sg
+```
+
+Inbound:
+
+```text
+HTTP
+Port: 80
+Source: 0.0.0.0/0
+```
+
+Later:
+
+```text
+HTTPS
+Port: 443
+Source: 0.0.0.0/0
+```
+
+Outbound:
+
+```text
+All traffic
+```
+
+## SG 2 — ECS Security Group
+
+Name:
+
+```text
+dev-ecs-sg
+```
+
+Inbound:
+
+```text
+Custom TCP
+Application Port
+Source:
+dev-alb-sg
+```
+
+For example:
+
+```text
+Port 4000
+Source: dev-alb-sg
+```
+
+Do NOT allow:
+
+```text
+0.0.0.0/0
+```
+
+## SG 3 — RDS Security Group
+
+Name:
+
+```text
+dev-rds-sg
+```
+
+Inbound:
+
+```text
+PostgreSQL
+Port: 5432
+Source: dev-ecs-sg
+```
+
+Never use:
+
+```text
+5432 ← 0.0.0.0/0
+```
+
+Final security chain:
+
+```text
+Internet
+   │
+   │ 80/443
+   ▼
+ALB SG
+   │
+   │ Application Port
+   ▼
+ECS SG
+   │
+   │ 5432
+   ▼
+RDS SG
+```
+
+---
+
+# PART 10 — Create ECR Repositories
+
+Create:
+
+```text
+dev-ui
+dev-auth
+dev-short
+```
+
+Architecture:
+
+```text
+Developer
+    │
+    ▼
+Docker Build
+    │
+    ▼
+Docker Image
+    │
+    ▼
+ECR
+ ┌──┼──────────┐
+ │  │          │
+UI Auth       Short
+```
+
+---
+
+# PART 11 — Build One Image Locally
+
+Start with:
+
+```text
+short-server
+```
+
+From your project:
+
+```bash
+docker build -t dev-short .
+```
+
+Check:
+
+```bash
+docker images
+```
+
+---
+
+# PART 12 — Authenticate Docker With ECR
+
+Check AWS CLI:
+
+```bash
+aws --version
+```
+
+Check credentials:
+
+```bash
+aws sts get-caller-identity
+```
+
+Login:
+
+```bash
+aws ecr get-login-password --region ap-south-1 | docker login --username AWS --password-stdin <ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com
+```
+
+---
+
+# PART 13 — Tag Image
+
+Example:
+
+```bash
+docker tag dev-short:latest \
+<ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/dev-short:a1b2c3d
+```
+
+Prefer Git commit SHA tags instead of `latest`.
+
+Example:
+
+```text
+dev-short:a1b2c3d
+```
+
+---
+
+# PART 14 — Push Image
+
+```bash
+docker push \
+<ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/dev-short:a1b2c3d
+```
+
+Flow:
+
+```text
+LOCAL
+Docker Image
+     │
+     │ docker push
+     ▼
+AWS ECR
+     │
+     ▼
+dev-short:a1b2c3d
+```
+
+---
+
+# PART 15 — Create ECS Cluster
+
+Go:
+
+```text
+ECS
+ ↓
+Clusters
+ ↓
+Create Cluster
+```
+
+Name:
+
+```text
+dev-microservices-cluster
+```
+
+Infrastructure:
+
+```text
+AWS Fargate
+```
+
+Initially deploy only:
+
+```text
+short-service
+```
+
+---
+
+# PART 16 — Create CloudWatch Log Group
+
+Create:
+
+```text
+/aws/ecs/dev-short
+```
+
+This will receive ECS container logs.
+
+---
+
+# PART 17 — Create ECS Task Execution IAM Role
+
+Create:
+
+```text
+dev-ecs-task-execution-role
+```
+
+Trusted entity:
+
+```text
+Elastic Container Service Task
+```
+
+Attach:
+
+```text
+AmazonECSTaskExecutionRolePolicy
+```
+
+---
+
+# PART 18 — Create ECS Task Definition
+
+Go:
+
+```text
+ECS
+ ↓
+Task Definitions
+ ↓
+Create
+```
+
+Choose:
+
+```text
+Fargate
+```
+
+Name:
+
+```text
+dev-short-task
+```
+
+Example resources:
+
+```text
+CPU:
+0.5 vCPU
+
+Memory:
+1 GB
+```
+
+## Container
+
+Name:
+
+```text
+short-server
+```
+
+Image:
+
+```text
+<ACCOUNT_ID>.dkr.ecr.ap-south-1.amazonaws.com/dev-short:a1b2c3d
+```
+
+Container port:
+
+```text
+4000
+```
+
+Logging:
+
+```text
+awslogs
+```
+
+Log group:
+
+```text
+/aws/ecs/dev-short
+```
+
+Region:
+
+```text
+ap-south-1
+```
+
+---
+
+# PART 19 — Create ECS Service
+
+Go:
+
+```text
+ECS
+ ↓
+Cluster
+ ↓
+dev-microservices-cluster
+ ↓
+Create Service
+```
+
+Configure:
+
+```text
+Launch type:
+Fargate
+
+Task definition:
+dev-short-task
+
+Service name:
+dev-short-service
+
+Desired count:
+1
+```
+
+---
+
+# PART 20 — Configure ECS Networking
+
+VPC:
+
+```text
+dev-microservices-vpc
+```
+
+Subnets:
+
+```text
+Private-A
+Private-B
+```
+
+Security Group:
+
+```text
+dev-ecs-sg
+```
+
+Public IP:
+
+```text
+OFF
+```
+
+Architecture:
+
+```text
+Internet
+   X
+   │
+   X
+ECS Fargate
+```
+
+---
+
+# PART 21 — First ECS Deployment
+
+Check:
+
+```text
+ECS
+ ↓
+Cluster
+ ↓
+Services
+ ↓
+dev-short-service
+ ↓
+Tasks
+```
+
+Expected:
+
+```text
+RUNNING
+```
+
+Flow:
+
+```text
+ECR
+ │
+ │ Docker Image
+ ▼
+ECS Task Definition
+ │
+ ▼
+ECS Service
+ │
+ ▼
+Fargate Task
+```
+
+---
+
+# PART 22 — Verify ECS Logs
+
+Go:
+
+```text
+ECS
+ ↓
+Cluster
+ ↓
+Service
+ ↓
+Task
+ ↓
+Logs
+```
+
+You should see your Node.js application logs.
+
+Equivalent local command:
+
+```bash
+docker logs short-server
+```
+
+AWS equivalent:
+
+```text
+ECS
+  ↓
+CloudWatch
+```
+
+---
+
+# PART 23 — Create Target Group
+
+Go:
+
+```text
+EC2
+ ↓
+Target Groups
+ ↓
+Create
+```
+
+Choose:
+
+```text
+Target type:
+IP addresses
+```
+
+Name:
+
+```text
+dev-short-tg
+```
+
+Protocol:
+
+```text
+HTTP
+```
+
+Port:
+
+```text
+4000
+```
+
+VPC:
+
+```text
+dev-microservices-vpc
+```
+
+Health check:
+
+```text
+Protocol:
+HTTP
+
+Path:
+/health
+```
+
+If your application does not have `/health`, add a simple endpoint that returns:
+
+```text
+200 OK
+```
+
+---
+
+# PART 24 — Create ALB
+
+Go:
+
+```text
+EC2
+ ↓
+Load Balancers
+ ↓
+Create
+ ↓
+Application Load Balancer
+```
+
+Name:
+
+```text
+dev-alb
+```
+
+Scheme:
+
+```text
+Internet-facing
+```
+
+IP type:
+
+```text
+IPv4
+```
+
+VPC:
+
+```text
+dev-microservices-vpc
+```
+
+Subnets:
+
+```text
+Public-A
+Public-B
+```
+
+Security Group:
+
+```text
+dev-alb-sg
+```
+
+---
+
+# PART 25 — ALB Listener
+
+Create:
+
+```text
+HTTP :80
+```
+
+Default action:
+
+```text
+Forward to:
+dev-short-tg
+```
+
+Architecture:
+
+```text
+Internet
+   │
+   │ HTTP :80
+   ▼
+┌──────────────┐
+│     ALB      │
+└──────┬───────┘
+       │
+       │ :4000
+       ▼
+┌──────────────┐
+│ ECS Fargate  │
+│ short-server │
+└──────────────┘
+```
+
+---
+
+# PART 26 — Connect ALB With ECS Service
+
+Update:
+
+```text
+ECS Service
+ ↓
+Load balancing
+ ↓
+Application Load Balancer
+```
+
+Configure:
+
+```text
+Load balancer:
+dev-alb
+
+Target group:
+dev-short-tg
+
+Container:
+short-server
+
+Port:
+4000
+```
+
+ECS will register the task IP with the target group.
+
+---
+
+# PART 27 — Fix Security Groups
+
+## ALB SG
+
+```text
+Inbound:
+
+80 ← 0.0.0.0/0
+```
+
+## ECS SG
+
+```text
+Inbound:
+
+4000 ← dev-alb-sg
+```
+
+## RDS SG
+
+Later:
+
+```text
+5432 ← dev-ecs-sg
+```
+
+Final:
+
+```text
+Internet
+   │
+   │ 80
+   ▼
+ALB SG
+   │
+   │ 4000
+   ▼
+ECS SG
+   │
+   │ 5432
+   ▼
+RDS SG
+```
+
+---
+
+# PART 28 — Test ALB
+
+Find:
+
+```text
+ALB
+ ↓
+DNS name
+```
+
+Open:
+
+```text
+http://<ALB-DNS-NAME>
+```
+
+Expected:
+
+```text
+ALB
+ ↓
+Target Group
+ ↓
+ECS
+ ↓
+short-server
+ ↓
+Response
+```
+
+---
+
+# PART 29 — Troubleshooting Checklist
+
+If you receive:
+
+```text
+503 Service Unavailable
+```
+
+check:
+
+```text
+1. ECS task RUNNING?
+2. Target registered?
+3. Target healthy?
+4. Container listening on correct port?
+5. ECS SG allows ALB SG?
+6. Health-check path correct?
+7. CloudWatch logs showing errors?
+8. Application binds to 0.0.0.0?
+```
+
+For Node.js, make sure the server listens on:
+
+```text
+0.0.0.0
+```
+
+not only:
+
+```text
+localhost
+```
+
+---
+
+# PART 30 — Phase 2 Architecture After One Service
+
+```text
+                         INTERNET
+                             │
+                             ▼
+                    ┌────────────────┐
+                    │      ALB       │
+                    │ Public Subnets │
+                    └───────┬────────┘
+                            │
+                            ▼
+                     Target Group
+                            │
+                            ▼
+                     ECS Fargate
+                            │
+                     short-service
+                            │
+                            ▼
+                       CloudWatch
+```
+
+Supporting:
+
+```text
+VPC
+├── Public-A
+├── Public-B
+├── Private-A
+└── Private-B
+
+Security Groups
+├── ALB SG
+└── ECS SG
+
+ECR
+└── dev-short
+
+IAM
+└── ECS execution role
+```
+
+---
+
+# PART 31 — Don't Move PostgreSQL Yet
+
+Do not migrate PostgreSQL during the initial ECS exercise.
+
+Keep:
+
+```text
+PostgreSQL
+   │
+   ▼
+Docker Compose
+```
+
+while learning:
+
+```text
+ECR
+ ↓
+ECS
+ ↓
+Fargate
+ ↓
+ALB
+```
+
+Then migrate PostgreSQL separately.
+
+---
+
+# PART 32 — Deploy Auth
+
+Once `short-server` works, repeat the pattern for Auth.
+
+Create:
+
+```text
+ECR
+└── dev-auth
+
+Target Group
+└── dev-auth-tg
+
+ECS Task Definition
+└── dev-auth-task
+
+ECS Service
+└── dev-auth-service
+```
+
+Example:
+
+```text
+Port:
+4000
+```
+
+Architecture:
+
+```text
+ALB
+ │
+ ├── auth-target-group
+ │       ↓
+ │   auth-service
+ │
+ └── short-target-group
+         ↓
+     short-service
+```
+
+---
+
+# PART 33 — Deploy UI
+
+Create:
+
+```text
+ECR
+└── dev-ui
+
+Target Group
+└── dev-ui-tg
+
+ECS Task Definition
+└── dev-ui-task
+
+ECS Service
+└── dev-ui-service
+```
+
+If UI listens on port 80:
+
+```text
+Target Group:
+HTTP :80
+```
+
+---
+
+# PART 34 — ALB Path-Based Routing
+
+Configure:
+
+```text
+ALB :80
+
+/api/auth/*
+       ↓
+auth-target-group
+
+/api/short/*
+       ↓
+short-target-group
+
+/*
+       ↓
+ui-target-group
+```
+
+Architecture:
+
+```text
+                   ALB
+                    │
+         ┌──────────┼──────────┐
+         │          │          │
+         ▼          ▼          ▼
+      /api/auth  /api/short     /*
+         │          │           │
+         ▼          ▼           ▼
+       AUTH       SHORT         UI
+```
+
+---
+
+# PART 35 — Phase 2 Final Architecture
+
+```text
+                           INTERNET
+                               │
+                               ▼
+                     ┌──────────────────┐
+                     │       ALB        │
+                     │  Public Subnets  │
+                     └────────┬─────────┘
+                              │
+             ┌────────────────┼────────────────┐
+             │                │                │
+             ▼                ▼                ▼
+        /api/auth/*     /api/short/*           /*
+             │                │                │
+             ▼                ▼                ▼
+       Auth Target       Short Target       UI Target
+             │                │                │
+             ▼                ▼                ▼
+       ECS Fargate       ECS Fargate       ECS Fargate
+             │                │                │
+             └────────────────┼────────────────┘
+                              │
+                        Private Network
+```
+
+Supporting:
+
+```text
+                         AWS VPC
+                           │
+          ┌────────────────┼────────────────┐
+          │                                 │
+    Public Subnets                    Private Subnets
+          │                                 │
+       ALB                           ECS Fargate
+          │                                 │
+    NAT Gateway ────────────────────────────┘
+```
+
+And:
+
+```text
+ECS
+ │
+ ├──────────────→ ECR
+ │
+ ├──────────────→ CloudWatch
+ │
+ └──────────────→ SSM
+```
+
+RDS will be added afterward.
+
+---
+
+# PART 36 — Phase 2 Verification Checklist
+
+## Networking
+
+```text
+[ ] VPC created
+[ ] Public subnet A
+[ ] Public subnet B
+[ ] Private subnet A
+[ ] Private subnet B
+[ ] Internet Gateway
+[ ] Public route table
+[ ] NAT Gateway
+[ ] Private route tables
+```
+
+## Security
+
+```text
+[ ] ALB SG
+[ ] ECS SG
+[ ] RDS SG prepared
+[ ] No ECS direct public access
+[ ] No RDS 5432 from internet
+```
+
+## Container Registry
+
+```text
+[ ] ECR repository created
+[ ] Docker image built
+[ ] Image tagged
+[ ] Image pushed
+```
+
+## ECS
+
+```text
+[ ] ECS cluster
+[ ] Task execution role
+[ ] Task definition
+[ ] ECS service
+[ ] Fargate task RUNNING
+[ ] Container logs
+```
+
+## ALB
+
+```text
+[ ] Target group
+[ ] Health check
+[ ] ALB
+[ ] Listener
+[ ] ECS registered with target group
+[ ] Target healthy
+[ ] ALB DNS works
+```
+
+## Microservices
+
+```text
+[ ] Short service
+[ ] Auth service
+[ ] UI service
+[ ] Path-based routing
+```
+
+---
+
+# PART 37 — What You Should Understand Before Moving On
+
+You should be able to explain:
+
+### 1. Why VPC?
+
+```text
+Logical AWS network
+```
+
+### 2. Why public subnet?
+
+```text
+ALB / internet-facing resources
+```
+
+### 3. Why private subnet?
+
+```text
+ECS / RDS isolation
+```
+
+### 4. Why Internet Gateway?
+
+```text
+VPC ↔ Internet
+```
+
+### 5. Why NAT Gateway?
+
+```text
+Private resources → outbound internet
+```
+
+### 6. Why Security Groups?
+
+```text
+Control network access
+```
+
+### 7. Why ECR?
+
+```text
+Store Docker images
+```
+
+### 8. Why ECS?
+
+```text
+Run containers
+```
+
+### 9. Why Fargate?
+
+```text
+Run containers without managing EC2 servers
+```
+
+### 10. Why ALB?
+
+```text
+Public entry point + routing
+```
+
+### 11. Why Target Group?
+
+```text
+Define/register application targets behind ALB
+```
+
+### 12. Why CloudWatch?
+
+```text
+Centralized application/container logs
+```
+
+---
+
+# 🚀 Exact Execution Order
+
+```text
+STEP 1
+│
+├── Create VPC
+├── Create 2 Public Subnets
+├── Create 2 Private Subnets
+├── Create Internet Gateway
+├── Public Route Table
+└── NAT Gateway
+        ↓
+STEP 2
+│
+├── Private Route Tables
+├── ALB Security Group
+└── ECS Security Group
+        ↓
+STEP 3
+│
+├── Create ECR
+├── Build short-server
+├── Tag image
+└── Push image
+        ↓
+STEP 4
+│
+├── Create ECS Cluster
+├── Create IAM Execution Role
+├── Create CloudWatch Log Group
+└── Create Task Definition
+        ↓
+STEP 5
+│
+├── Create ECS Service
+├── Private Subnets
+├── ECS Security Group
+└── Fargate Task
+        ↓
+STEP 6
+│
+├── Create Target Group
+├── Create ALB
+├── Listener :80
+└── Connect ALB → ECS
+        ↓
+STEP 7
+│
+├── Verify health check
+├── Verify logs
+├── Test ALB DNS
+└── Fix networking issues
+        ↓
+STEP 8
+│
+├── Deploy Auth
+├── Deploy Short
+└── Deploy UI
+        ↓
+STEP 9
+│
+├── Create target groups
+├── Configure ALB rules
+└── Test complete application
+```
+
+---
+
+# 🎯 Final Phase 2 Success Condition
+
+```text
+docker-compose
+     │
+     │ local reference
+     ▼
+
+AWS
+
+Internet
+   │
+   ▼
+ALB
+   │
+   ├── UI
+   ├── Auth
+   └── Short
+         │
+         ▼
+    ECS Fargate
+         │
+         ▼
+    CloudWatch
+
+Docker Images
+      │
+      ▼
+     ECR
+```
+
+## Important
+
+Once this works manually:
+
+```text
+STOP.
+```
+
+Do **not** start Terraform yet.
+
+The next project steps are:
+
+```text
+Phase 2
+Manual AWS Infrastructure
+        ↓
+RDS PostgreSQL
+        ↓
+SSM + CloudWatch
+        ↓
+Terraform
+        ↓
+Git/GitHub
+        ↓
+GitHub Actions
+        ↓
+CI/CD
+```
