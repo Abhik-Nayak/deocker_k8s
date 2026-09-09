@@ -1,5 +1,7 @@
-const AUTH_URL = import.meta.env.VITE_AUTH_URL ?? "http://localhost:4000";
-const SHORT_URL = import.meta.env.VITE_SHORT_URL ?? "http://localhost:5000";
+// const AUTH_URL = import.meta.env.VITE_AUTH_URL ?? "http://localhost:4000";
+// const SHORT_URL = import.meta.env.VITE_SHORT_URL ?? "http://localhost:5000";
+const AUTH_URL = "";
+const SHORT_URL = "";
 
 const TOKEN_KEY = "shorten-url-token";
 
