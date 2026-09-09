@@ -18,8 +18,16 @@ app.get("/health", (_req, res) =>
 );
 
 app.use("/api", linksRouter);
+
+// before
 // Kept last so it does not swallow /api or /health.
-app.use("/", redirectRouter);
+// app.use("/", redirectRouter);
+
+// after
+// Prefixed so short links do not collide with the UI at / under one hostname.
+app.use("/r", redirectRouter);
+
+
 
 app.use(
   (
