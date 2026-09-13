@@ -1,0 +1,24 @@
+apiVersion: apps/v1
+kind: Deployment   #"You are a manager, not a worker."
+metadata:
+  name: auth-server         #The manager's name is auth.
+spec:
+  replicas: 1     #"Always keep 1 running. Not 0, not 2."
+  selector:
+    matchLabels:
+      app: auth-server               # (A) which Pods do I manage?
+  template:                 # ---- everything below describes a Pod ----
+    metadata:
+      labels:
+        app: auth-server             # (B) MUST match (A), and the Service selects on it
+    spec:
+      containers:
+        - name: auth-server
+          image: shorten/auth-server:2709732
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - secretRef:
+                name: shorten-secrets
+          ports:
+            - containerPort: 4000
+

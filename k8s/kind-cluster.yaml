@@ -1,0 +1,32 @@
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: shorten
+
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"   # ingress-nginx schedules only onto this label
+    extraPortMappings:
+      - containerPort: 80                       # laptop :80 -> node :80, for http://shorten.local
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
+                                 # So: 80/443 = your app's traffic (yours, from the YAML). 64835→6443 = kubectl's traffic (kind's, automatic).
+  - role: worker
+  - role: worker
+
+# Cluster = the Kubernetes system itself: one control plane (the brain) + workers (where your pods run).
+
+# kind create cluster creates 3 Docker containers — shorten-control-plane, shorten-worker, shorten-worker2. Each one is a fake "machine" running Kubernetes from the kindest/node image. None of them are your app.
+
+
+# kind create cluster   →  3 containers = empty Kubernetes, no app
+# Part 2.3 (docker build) →  your app images
+# Part 2.5 (Deployment)  →  your app finally runs, inside a worker
+# So: cluster first (empty), your containers later, running inside those workers.

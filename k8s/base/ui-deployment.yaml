@@ -1,0 +1,30 @@
+apiVersion: apps/v1
+kind: Deployment   #"You are a manager, not a worker."
+metadata:
+  name: ui          #The manager's name is ui.
+spec:
+  replicas: 1     #"Always keep 1 running. Not 0, not 2."
+  selector:
+    matchLabels:
+      app: ui              # (A) which Pods do I manage?
+  template:                 # ---- everything below describes a Pod ----
+    metadata:
+      labels:
+        app: ui          # (B) MUST match (A), and the Service selects on it
+    spec:
+      containers:
+        - name: ui
+          image: shorten/ui:2709732
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 3000
+
+# lines 1-9    → orders for the manager
+# lines 10-20  → the photo of what to build
+
+# line 9  (A)  → "I manage things wearing app: ui"
+# line 13 (B)  → "everything I build wears app: ui"
+# If they don't match, the manager builds pods and then doesn't recognize them — so it builds more, forever. That's why Kubernetes refuses to accept the file if they differ. It's one of the very few mistakes it catches for you.
+
+# Why containerPort: 3000 and not 80
+# Your nginx in ui/nginx.conf listens on 3000. Write 80 here and the pod says Running, says Ready, looks perfectly healthy — and refuses every connection. Nothing looks broken. That's the nastiest kind of bug.
