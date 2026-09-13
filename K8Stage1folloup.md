@@ -57,11 +57,13 @@ Open a new terminal and you must set it again.
 | Part 2.8 — other three failure modes | ✅ all four signatures caused and read |
 | Part 2.9 — debug loop | ✅ used to diagnose a real failure end to end |
 | Part 3 — Services and cluster DNS | ✅ three ClusterIP Services, DNS verified |
-| Part 4 — ConfigMap + Secret properly | ⬜ **next thing to do** |
+| Part 4 — ConfigMap + Secret properly | ✅ all five env vars injected |
 | Part 5 — Postgres StatefulSet | ✅ done early, out of order — see 2.7 |
-| Part 6 — probes, resources, scaling | ⬜ |
-| Part 7 — Ingress and TLS | ⬜ makes the app usable in a browser |
-| Parts 8–10 | ⬜ |
+| Part 6 — probes, resources, scaling | ✅ bad deploy stalled, site stayed up |
+| Part 7 — Ingress and TLS | ✅ HTTP done, end-to-end verified. TLS still ⬜ |
+| Part 8 — security and isolation | ⬜ **next** — all zero today |
+| Part 9 — Kustomize | ⬜ |
+| Part 10 — rebuild from repo | ⬜ |
 
 > Part 2 was reset and redone from scratch on 2026-09-12.
 >
@@ -885,7 +887,7 @@ kubectl patch svc ui --type=json -p '[{"op":"replace","path":"/spec/type","value
 
 ---
 
-# Part 4 — ConfigMap and Secret, properly
+# Part 4 — ConfigMap and Secret, properly ✅ DONE
 
 Roadmap §1.3. Part 2.7 got you running with an imperative Secret. Now do it
 properly.
@@ -948,9 +950,51 @@ Secret's real protections are RBAC (who can read it), encryption-at-rest in etcd
 where this gets solved properly: **Stage 2 — Secrets Manager + External Secrets or
 the Secrets Store CSI driver, with IRSA.**
 
-- [ ] both backends read `JWT_SECRET` from the same Secret key
-- [ ] you have decoded a Secret yourself and understand it is encoding, not encryption
-- [ ] you have noted where Stage 2 fixes it
+- [x] both backends read `JWT_SECRET` from the same Secret key
+- [x] you have decoded a Secret yourself and understand it is encoding, not encryption
+- [x] you have noted where Stage 2 fixes it
+
+### What happened (2026-09-14)
+
+`k8s/base/configmap.yaml` holds the three non-secret keys; `shorten-secrets` stays
+imperative and uncommitted. Verified with `kubectl exec deploy/<name> -- printenv`:
+
+| Key | short-server | auth-server | Source |
+| --- | --- | --- | --- |
+| `DATABASE_URL` | ✅ | ✅ | Secret |
+| `JWT_SECRET` | ✅ | ✅ | Secret |
+| `PORT` | ✅ | ✅ (ignored) | ConfigMap |
+| `PUBLIC_BASE_URL` | ✅ | ✅ (ignored) | ConfigMap |
+| `JWT_EXPIRES_MINUTES` | ✅ (ignored) | ✅ | ConfigMap |
+
+**`envFrom` is all-or-nothing.** Every key lands in every container that references
+the source. `auth-server` receives `PORT=5000` but listens on 4000 — safe only
+because its port is hardcoded in the Dockerfile (`--port 4000`), not read from the
+environment. That is luck, not design. Use explicit `env:` + `valueFrom` when a key
+must reach only one container.
+
+**Trap hit — a fifth failure signature.** A typo, `name: shorten-secretss`, produced:
+
+```
+short-server-f7c54bcf-z65vq   0/1   CreateContainerConfigError
+```
+
+| Signature | Means |
+| --- | --- |
+| `ImagePullBackOff` | image does not exist |
+| `CrashLoopBackOff` | app starts, then dies |
+| `Pending` | scheduler cannot place it |
+| `OOMKilled` | kernel killed it |
+| **`CreateContainerConfigError`** | **referenced ConfigMap/Secret does not exist** |
+
+The container never started, so `kubectl logs` returned nothing — `describe` was the
+only tool that worked. Meanwhile the **old Pod kept serving**: Kubernetes will not
+remove a working Pod until the replacement is Ready, so the typo caused zero
+downtime. That is the rolling-update guarantee, made explicit by `maxUnavailable: 0`
+in Part 6.
+
+> ⚠️ `PUBLIC_BASE_URL` is now `http://shorten.local/r`, which does not resolve until
+> Part 7. Short links display correctly but will not open in a browser yet.
 
 ---
 
@@ -1039,7 +1083,7 @@ That limitation *is* the argument for RDS in Stage 2. Notice it here.
 
 ---
 
-# Part 6 — Probes, resources, self-healing
+# Part 6 — Probes, resources, self-healing ✅ DONE
 
 Roadmap §1.5.
 
@@ -1106,15 +1150,73 @@ rollout simply waits. Your bad deploy did nothing to users. That is what readine
 probes buy you — without one, Kubernetes would consider a crashed container "up"
 and happily replace everything.
 
-- [ ] readiness + liveness on all three; startupProbe where the DB connect is slow
-- [ ] `requests` and `limits` on everything
-- [ ] `short-server` at 3 replicas, redirects still correct
-- [ ] HPA on CPU, load generated, scale-up observed
-- [ ] `maxUnavailable: 0` + PodDisruptionBudget; bad image stalled, `rollout undo` recovered it
+- [x] readiness + liveness on all three; startupProbe where the DB connect is slow
+- [x] `requests` and `limits` on everything
+- [x] `short-server` at 3 replicas, redirects still correct
+- [x] HPA on CPU — created and reading metrics (`cpu: 4%/60%`). Load test still ⬜
+- [x] `maxUnavailable: 0` + PodDisruptionBudget; bad image stalled, `rollout undo` recovered it
+
+### What happened (2026-09-14)
+
+**Probes made "Ready" mean something.** The `-w` output during the rollout:
+
+```
+short-server-cfd76c64c-8zxfm   0/1  Running       3s   <- started, NOT ready
+short-server-cfd76c64c-8zxfm   1/1  Running       5s   <- /health answered
+short-server-5d867c669b-8nskp  1/1  Terminating        <- only now is the old one removed
+```
+
+Before the probes, a Pod flipped to `1/1` the instant the process started — before
+Postgres was connected.
+
+> **Caveat worth remembering:** at `replicas: 1`, the default `maxUnavailable: 25%`
+> already rounds *down* to 0, so that safe ordering would have happened anyway.
+> `maxUnavailable: 0` only starts to matter at 3 replicas.
+
+**`metrics-server` is not in kind — install it for the HPA.** It also needs a patch,
+because kubelets use self-signed certs:
+
+```powershell
+kubectl apply -f https://github.com/kubernetes-sigs/metrics-server/releases/latest/download/components.yaml
+kubectl -n kube-system patch deploy metrics-server --type=json -p '[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--kubelet-insecure-tls"}]'
+```
+
+Without that patch it runs but never reports, and the HPA shows `cpu: <unknown>/60%`
+forever. Pin the release before Part 10.
+
+### The bad-deploy drill — the payoff
+
+```
+kubectl set image deploy/short-server short-server=shorten/short-server:broken
+
+short-server-655c588756-6rhzx  0/1  ImagePullBackOff   <- the bad one, quarantined
+short-server-cfd76c64c-8zxfm   1/1  Running            <- all three originals
+short-server-cfd76c64c-fdq25   1/1  Running               still serving
+short-server-cfd76c64c-qh4xv   1/1  Running
+
+GET /            HTTP 200
+GET /r/KXrMX1v   HTTP 302
+```
+
+`rollout status` timed out instead of failing; `rollout undo` restored it without
+touching the three healthy Pods. **A broken deploy did nothing to users.**
+
+### ⚠️ Open conflict — `replicas` vs the HPA
+
+[short-deployment.yaml](k8s/base/short-deployment.yaml) declares `replicas: 3` and the
+HPA manages the same field (`min 2, max 6`). They will fight: every `kubectl apply`
+resets the count to 3, and the HPA immediately moves it back.
+
+**Fix in Part 9:** remove `replicas` from the Deployment once an HPA owns it. Until
+then, expect a brief thrash after each apply.
+
+> `kubectl rollout undo` also warns that it does not update the
+> `last-applied-configuration` annotation. Rollback is a break-glass tool — the
+> durable fix is to correct the YAML and `apply`.
 
 ---
 
-# Part 7 — Ingress and TLS
+# Part 7 — Ingress and TLS — ✅ HTTP done, TLS pending
 
 Roadmap §1.6. Part 1 already did the hard work — this is now four plain rules.
 
@@ -1194,9 +1296,42 @@ Generate a self-signed cert, put it in a `tls` Secret, add a `tls:` block to the
 Ingress. Your browser will warn — that is correct, and it is the same mechanism
 ACM will provide in Stage 2.
 
-- [ ] all four rules work: register → shorten → history → follow the short link, on `http://shorten.local`
-- [ ] you can explain `Prefix` vs `ImplementationSpecific`
+- [x] all four rules work: register → shorten → history → follow the short link, on `http://shorten.local`
+- [x] you can explain `Prefix` vs `ImplementationSpecific`
 - [ ] one rewrite annotation tried, understood, and removed
+
+### Verified end to end (2026-09-14)
+
+```
+POST /auth/register  -> 201, JWT issued
+POST /auth/login     -> token
+POST /api/shorten    -> http://shorten.local/r/KXrMX1v
+GET  /r/KXrMX1v      -> 302 -> https://kubernetes.io/docs/...
+```
+
+**🔴 Trap — the upstream `main` manifest no longer honours `ingress-ready`.**
+The controller shipped with `nodeSelector: {kubernetes.io/os: linux}` only, so the
+scheduler put it on `shorten-worker` — a node with **no** Docker port mapping for
+80/443. Symptom: `curl http://shorten.local/` returned `HTTP 000`, nothing at all.
+
+Nothing in `kind-cluster.yaml` was wrong. The upstream manifest drifted. Fix:
+
+```powershell
+kubectl -n ingress-nginx patch deploy ingress-nginx-controller --type=json -p '[{"op":"add","path":"/spec/template/spec/nodeSelector/ingress-ready","value":"true"}]'
+```
+
+**Before Part 10, pin the install URL to a release tag instead of `main`** — a
+cluster rebuilt from this repo must get the manifest that was actually tested.
+
+**Trap — `/health` is not reachable through the Ingress.** Both backends serve
+`/health` at their *root*, but the Ingress only forwards `/auth`, `/api` and `/r`.
+So `http://shorten.local/auth/health` returns FastAPI's `{"detail":"Not Found"}`
+and `/api/health` returns Express's `Cannot GET /api/health`.
+
+Those 404s look like failures and are actually **proof the routing works** — two
+different frameworks answering means each request reached its own backend. Use the
+real routes (`/auth/register`, `/api/shorten`) to test, or `kubectl exec` for
+`/health`.
 - [ ] self-signed cert in a `tls` Secret; `https://shorten.local` serves it
 - [ ] CORS tightened — `allow_origins=["*"]` in [auth-server/app/main.py](auth-server/app/main.py) and the bare `cors()` in [short-server/src/index.ts](short-server/src/index.ts) are no longer needed
 

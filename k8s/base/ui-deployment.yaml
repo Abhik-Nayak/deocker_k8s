@@ -4,6 +4,10 @@ metadata:
   name: ui          #The manager's name is ui.
 spec:
   replicas: 1     #"Always keep 1 running. Not 0, not 2."
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0   # never remove a working Pod before the new one is Ready
+      maxSurge: 1
   selector:
     matchLabels:
       app: ui              # (A) which Pods do I manage?
@@ -17,7 +21,26 @@ spec:
           image: shorten/ui:2709732
           imagePullPolicy: IfNotPresent
           ports:
-            - containerPort: 3000
+            - containerPort: 3000          
+          readinessProbe:                 # can I serve traffic right now?
+            httpGet:
+              path: /
+              port: 3000
+            periodSeconds: 5
+          livenessProbe:                  # am I wedged and beyond saving?
+            httpGet:
+              path: /
+              port: 3000
+            periodSeconds: 10
+          resources:
+            requests:
+              memory: 64Mi
+              cpu: 50m
+            limits:
+              memory: 128Mi
+              cpu: 200m
+
+          
 
 # lines 1-9    → orders for the manager
 # lines 10-20  → the photo of what to build

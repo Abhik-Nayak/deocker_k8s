@@ -3,7 +3,11 @@ kind: Deployment   #"You are a manager, not a worker."
 metadata:
   name: short-server          #The manager's name is short.
 spec:
-  replicas: 1     #"Always keep 1 running. Not 0, not 2."
+  replicas: 3     # stateless - any replica can serve any redirect
+  strategy:
+    rollingUpdate:
+      maxUnavailable: 0   # never remove a working Pod before the new one is Ready
+      maxSurge: 1
   selector:
     matchLabels:
       app: short-server               # (A) which Pods do I manage?
@@ -17,8 +21,24 @@ spec:
           image: shorten/short-server:2709732
           imagePullPolicy: IfNotPresent
           envFrom:
+            - configMapRef:
+                name: shorten-config
             - secretRef:
                 name: shorten-secrets
           ports:
             - containerPort: 5000
+          startupProbe:
+            httpGet: { path: /health, port: 5000 }
+            failureThreshold: 30
+            periodSeconds: 2
+          readinessProbe:
+            httpGet: { path: /health, port: 5000 }
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: 5000 }
+            periodSeconds: 10
+          resources:
+            requests: { memory: 64Mi, cpu: 50m }
+            limits:   { memory: 256Mi, cpu: 500m }
+
 

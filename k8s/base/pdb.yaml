@@ -1,0 +1,9 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: short-server
+spec:
+  minAvailable: 2              # node drains may never take us below 2 of 3
+  selector:
+    matchLabels:
+      app: short-server
