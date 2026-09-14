@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: shorten-dev
+
+labels:
+  - pairs:
+      app.kubernetes.io/part-of: shorten
+    includeSelectors: false
+
+resources:
+  - namespace.yaml
+  - configmap.yaml
+  - serviceaccounts.yaml
+  - ui-deployment.yaml
+  - auth-deployment.yaml
+  - short-deployment.yaml
+  - services/ui-service.yaml
+  - services/auth-service.yaml
+  - services/short-service.yaml
+  - ingress.yaml
+  - hpa.yaml
+  - pdb.yaml
+  - limitrange.yaml
+  - resourcequota.yaml
+  - networkpolicy.yaml

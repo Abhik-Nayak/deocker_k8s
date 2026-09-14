@@ -16,10 +16,21 @@ spec:
       labels:
         app: ui          # (B) MUST match (A), and the Service selects on it
     spec:
+      serviceAccountName: ui
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
       containers:
         - name: ui
-          image: shorten/ui:2709732
+          image: shorten/ui:2709732-nonroot
           imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           ports:
             - containerPort: 3000          
           readinessProbe:                 # can I serve traffic right now?
@@ -32,6 +43,9 @@ spec:
               path: /
               port: 3000
             periodSeconds: 10
+          volumeMounts:
+            - name: tmp                 # nginx needs a writable /tmp for its temp dirs
+              mountPath: /tmp
           resources:
             requests:
               memory: 64Mi
@@ -41,6 +55,10 @@ spec:
               cpu: 200m
 
           
+      volumes:
+        - name: tmp
+          emptyDir: {}
+
 
 # lines 1-9    → orders for the manager
 # lines 10-20  → the photo of what to build

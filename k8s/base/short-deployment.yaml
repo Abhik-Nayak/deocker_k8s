@@ -3,7 +3,7 @@ kind: Deployment   #"You are a manager, not a worker."
 metadata:
   name: short-server          #The manager's name is short.
 spec:
-  replicas: 3     # stateless - any replica can serve any redirect
+  # replicas intentionally absent - the HPA owns this field
   strategy:
     rollingUpdate:
       maxUnavailable: 0   # never remove a working Pod before the new one is Ready
@@ -16,10 +16,21 @@ spec:
       labels:
         app: short-server             # (B) MUST match (A), and the Service selects on it
     spec:
+      serviceAccountName: short-server
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: short-server
-          image: shorten/short-server:2709732
+          image: shorten/short-server:2709732-nonroot
           imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           envFrom:
             - configMapRef:
                 name: shorten-config

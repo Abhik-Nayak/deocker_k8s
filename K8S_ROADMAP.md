@@ -7,9 +7,9 @@ Not a "30 days" plan. Four stages, each with a **definition of done**. Move on
 only when the definition of done is true — the stages build on each other.
 
 ```
-Stage 0  Baseline      know exactly what you are deploying        (short)
-Stage 1  Local k8s     the whole app on your laptop, k8s-native   (the long one)
-Stage 2  AWS           EKS + ECR + real VPC networking/security
+Stage 0  Baseline      know exactly what you are deploying        ✅ DONE
+Stage 1  Local k8s     the whole app on your laptop, k8s-native   ✅ DONE  2026-09-14
+Stage 2  AWS           EKS + ECR + real VPC networking/security   <- you are here
 Stage 3  Production    reliability, Prometheus/Grafana, CI/CD
 ```
 
@@ -52,7 +52,7 @@ Two facts that shape every manifest you will write:
 
 ---
 
-## Stage 1 — Local Kubernetes
+## Stage 1 — Local Kubernetes ✅ DONE (2026-09-14)
 
 **Goal:** the entire app on a local cluster using the real primitives — not one
 mega-Pod. This is where the actual learning happens. Do not rush it to get to
@@ -175,6 +175,55 @@ k8s/
 healthy; a single hostname serves UI, API and redirects; deleting any
 application Pod is invisible to the user; a default-deny NetworkPolicy is in
 force; and you can explain every field you typed.
+
+### ✅ Passed — 2026-09-14
+
+Proven the only way that counts: `kind delete cluster`, then rebuilt from this
+repo with `k8s/bootstrap.ps1` (exit 0).
+
+```
+3 nodes Ready             ingress controller on shorten-control-plane
+5 Pods Running            https 200 / http 308 -> https
+register -> shorten -> follow:  302 -> https://kubernetes.io/
+ui -> postgres BLOCKED    short-server -> postgres CONNECTED
+uid 101 / 1000 / 1000     ResourceQuota rejects an oversized Pod
+metrics-server reporting  HPA cpu 14%/60%
+deleted a Pod mid-request -> site stayed HTTP 200
+```
+
+Final layout — Kustomize, not Helm (`kubectl` bundles it):
+
+```
+k8s/
+  kind-cluster.yaml
+  bootstrap.ps1              everything kubectl cannot apply, versions pinned
+  patches/                   JSON patches for ingress-nginx + metrics-server
+  base/                      the app: 14 resources, no database
+  components/postgres/       in-cluster Postgres - dev only
+  overlays/dev/              local image tags + postgres + shorten.local
+  overlays/prod/             ECR images + RDS (no StatefulSet) + real hostname
+```
+
+The blow-by-blow, including every trap hit, is in
+[K8Stage1folloup.md](K8Stage1folloup.md).
+
+**Three things Stage 2 inherits:**
+
+1. `kubectl kustomize k8s/overlays/prod` already renders ECR image names, a real
+   hostname, and **no StatefulSet** — Stage 2 starts from a rendered manifest,
+   not a blank file.
+2. RDS was deleted on 2026-09-12 (home-IP whitelisting made it unusable from the
+   laptop). Stage 2 creates a fresh one *inside* the VPC, where that problem
+   does not exist.
+3. Part 8.4's ServiceAccount + RBAC work is exactly what IRSA extends to AWS.
+
+**Carried forward, not done:**
+
+- `- [ ] you can explain every field you typed` — several manifests were written
+  for the repo owner rather than by them. Re-read `base/networkpolicy.yaml`,
+  `components/postgres/`, the overlays and `bootstrap.ps1` before Stage 2.
+- Images are tagged `2709732-nonroot`, a placeholder. Retag with a real short
+  SHA after committing the Dockerfile changes.
 
 ---
 

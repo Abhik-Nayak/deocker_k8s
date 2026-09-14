@@ -4,6 +4,10 @@ metadata:
   name: shorten
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - shorten.local
+      secretName: shorten-tls   # created imperatively; see k8s/bootstrap.md
   rules:
     - host: shorten.local
       http:

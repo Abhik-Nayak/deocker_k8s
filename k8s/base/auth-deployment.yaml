@@ -16,10 +16,21 @@ spec:
       labels:
         app: auth-server             # (B) MUST match (A), and the Service selects on it
     spec:
+      serviceAccountName: auth-server
+      automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
       containers:
         - name: auth-server
-          image: shorten/auth-server:2709732
+          image: shorten/auth-server:2709732-nonroot
           imagePullPolicy: IfNotPresent
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
           envFrom:
             - configMapRef:
                 name: shorten-config

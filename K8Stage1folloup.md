@@ -60,10 +60,11 @@ Open a new terminal and you must set it again.
 | Part 4 — ConfigMap + Secret properly | ✅ all five env vars injected |
 | Part 5 — Postgres StatefulSet | ✅ done early, out of order — see 2.7 |
 | Part 6 — probes, resources, scaling | ✅ bad deploy stalled, site stayed up |
-| Part 7 — Ingress and TLS | ✅ HTTP done, end-to-end verified. TLS still ⬜ |
-| Part 8 — security and isolation | ⬜ **next** — all zero today |
-| Part 9 — Kustomize | ⬜ |
-| Part 10 — rebuild from repo | ⬜ |
+| Part 7 — Ingress and TLS | ✅ HTTPS, auto 308 redirect from HTTP |
+| Part 8 — security and isolation | ✅ non-root, default-deny, RBAC — all verified |
+| Part 9 — Kustomize | ✅ base + components + dev/prod overlays |
+| Part 10 — rebuild from repo | ✅ cluster destroyed and rebuilt, all checks pass |
+| **Stage 1** | ✅ **COMPLETE — nothing committed yet** |
 
 > Part 2 was reset and redone from scratch on 2026-09-12.
 >
@@ -1332,12 +1333,24 @@ Those 404s look like failures and are actually **proof the routing works** — t
 different frameworks answering means each request reached its own backend. Use the
 real routes (`/auth/register`, `/api/shorten`) to test, or `kubectl exec` for
 `/health`.
-- [ ] self-signed cert in a `tls` Secret; `https://shorten.local` serves it
+- [x] self-signed cert in a `tls` Secret; `https://shorten.local` serves it
+
+```
+https://shorten.local/       200   (browser warns - correct for self-signed)
+http://shorten.local/        308 -> https
+cert: CN=shorten.local, SAN DNS:shorten.local, valid to Dec 2028
+```
+
+> ingress-nginx adds the HTTP->HTTPS 308 **automatically** the moment a `tls:` block
+> exists. No annotation needed; disable with `nginx.ingress.kubernetes.io/ssl-redirect: "false"`.
+>
+> Generating the cert in Git Bash needs `MSYS_NO_PATHCONV=1`, or `-subj "/CN=..."`
+> gets rewritten into a Windows path.
 - [ ] CORS tightened — `allow_origins=["*"]` in [auth-server/app/main.py](auth-server/app/main.py) and the bare `cors()` in [short-server/src/index.ts](short-server/src/index.ts) are no longer needed
 
 ---
 
-# Part 8 — Security and isolation
+# Part 8 — Security and isolation ✅ DONE
 
 Roadmap §1.7.
 
@@ -1351,8 +1364,19 @@ Write both, then deliberately try to apply an oversized Pod and watch it get
 rejected. A quota you have never seen enforce anything is a quota you do not
 understand.
 
-- [ ] everything in `shorten-dev`, nothing in `default`
-- [ ] a `ResourceQuota` and `LimitRange` that actually reject an over-large Pod
+- [x] everything in `shorten-dev`, nothing in `default`
+- [x] a `ResourceQuota` and `LimitRange` that actually reject an over-large Pod
+
+> **Apply the LimitRange first.** A ResourceQuota that tracks cpu/memory rejects any
+> Pod without limits, and `postgres` declared none. The LimitRange injects defaults,
+> so the quota has something to count.
+>
+> Proof it enforces:
+>
+> ```
+> kubectl run toobig --image=nginx --requests=cpu=3 --limits=cpu=3
+> Error from server (Forbidden): maximum cpu usage per Container is 2, but limit is 3
+> ```
 
 ## 8.2 Stop running as root
 
@@ -1388,7 +1412,34 @@ Per image:
 **Note:** binding port 3000 is *not* the problem — only ports below 1024 need
 privileges. Writable paths are the problem.
 
-- [ ] all three run as non-root with a read-only root filesystem
+- [x] all three run as non-root with a read-only root filesystem
+
+### Verified (2026-09-14)
+
+```
+ui           uid=101   writable-root=NO
+auth-server  uid=1000  writable-root=NO
+short-server uid=1000  writable-root=NO
+```
+
+| Image | Change |
+| --- | --- |
+| `short-server` | `RUN chown -R node:node /app` + `USER node` (alpine ships uid 1000) |
+| `auth-server` | `RUN useradd -u 1000 -m appuser && chown -R appuser:appuser /app` + `USER appuser` |
+| `ui` | base image swapped to `nginxinc/nginx-unprivileged:alpine` (runs as uid **101**, not 1000) |
+
+**Trap — the UI crash-looped on `readOnlyRootFilesystem`.** The unprivileged image
+still needs a writable `/tmp`:
+
+```
+nginx: [emerg] mkdir() "/tmp/proxy_temp" failed (30: Read-only file system)
+```
+
+Fix: an `emptyDir` mounted at `/tmp`. The backends needed nothing. And note `runAsUser`
+must match the image — 101 for the UI, not the 1000 used elsewhere.
+
+> Images are tagged `2709732-nonroot` because the Dockerfile changes are **not yet
+> committed**. Retag with a real short SHA after committing.
 
 ## 8.3 NetworkPolicy — and a warning
 
@@ -1428,8 +1479,32 @@ kubectl exec -it deploy/ui -- nc -zv postgres 5432    # MUST fail after default-
 If it still connects, recreate the cluster with `networking.disableDefaultCNI: true`
 in `k8s/kind-cluster.yaml`, install Calico, and re-test.
 
-- [ ] default-deny in force **and empirically verified** from the UI Pod
-- [ ] auth and short still reach Postgres; the UI cannot
+- [x] default-deny in force **and empirically verified** from the UI Pod
+- [x] auth and short still reach Postgres; the UI cannot
+
+### Verified (2026-09-14) — kindnet **does** enforce; no Calico needed
+
+```
+ui           -> postgres:5432   BLOCKED
+short-server -> postgres:5432   CONNECTED
+site 200 / redirect 302 / login 200
+```
+
+Four policies in [k8s/base/networkpolicy.yaml](k8s/base/networkpolicy.yaml):
+`default-deny-ingress`, `allow-ingress-nginx-to-apps`, `allow-kubelet-probes`,
+`allow-backends-to-postgres`.
+
+**🔴 Trap — a too-broad allow rule silently defeats the whole policy.** The probe
+rule was first written as `ipBlock: 10.244.0.0/16` to let kubelet probes through.
+That CIDR is the **entire pod network**, so it re-allowed every Pod: the ui→postgres
+test connected, which looked exactly like "kindnet ignores NetworkPolicy".
+
+The real probe source is each node's pod-network gateway — visible in the nginx access
+log as `10.244.1.1 ... "kube-probe/1.36"`. Narrowing to `10.244.0.1/32`,
+`10.244.1.1/32`, `10.244.2.1/32` made the deny real while keeping probes alive.
+
+**A policy that permits too much and a CNI that ignores policy produce identical
+symptoms.** Always narrow the allow rules before blaming the CNI.
 
 ## 8.4 RBAC
 
@@ -1453,12 +1528,27 @@ kubectl auth can-i list pods --as=system:serviceaccount:shorten-dev:short-server
 ServiceAccount, not this node, gets these permissions."* RBAC being a mystery here
 makes IRSA a mystery there.
 
-- [ ] a ServiceAccount per service with `automountServiceAccountToken: false`
-- [ ] one Role / RoleBinding exercise, verified with `kubectl auth can-i`
+- [x] a ServiceAccount per service with `automountServiceAccountToken: false`
+- [x] one Role / RoleBinding exercise, verified with `kubectl auth can-i`
+
+### Verified (2026-09-14)
+
+```
+ui / auth-server / short-server:  no token mounted
+short-server can list pods     -> yes   (Role pod-reader + RoleBinding)
+short-server can list secrets  -> no
+ui           can list pods     -> no
+```
+
+`automountServiceAccountToken: false` is set in **both** places — on the
+ServiceAccount and on the Pod spec. The Pod-spec setting is the one that wins.
+
+> `kubectl auth can-i` exits **1** when the answer is "no". That is the tool working,
+> not an error.
 
 ---
 
-# Part 9 — Package it
+# Part 9 — Package it ✅ DONE
 
 Roadmap §1.8.
 
@@ -1500,12 +1590,35 @@ kubectl kustomize k8s/overlays/prod        # render without applying
 `kubectl kustomize` printing correct YAML for an environment that does not exist
 yet is the whole point — Stage 2 starts from a rendered manifest, not a blank file.
 
-- [ ] `kubectl apply -k k8s/overlays/dev` brings up everything
-- [ ] `kubectl kustomize k8s/overlays/prod` renders sensibly
+- [x] `kubectl apply -k k8s/overlays/dev` brings up everything
+- [x] `kubectl kustomize k8s/overlays/prod` renders sensibly
+
+### Final layout
+
+```
+k8s/
+  kind-cluster.yaml
+  bootstrap.ps1              everything kubectl cannot apply
+  patches/                   JSON patch files for ingress-nginx + metrics-server
+  base/                      the app: 14 resources, no database
+  components/postgres/       in-cluster Postgres - dev only
+  overlays/dev/              local image tags + postgres + shorten.local
+  overlays/prod/             ECR images + RDS (no StatefulSet) + shorten.example.com
+```
+
+`prod` renders with **zero StatefulSets** — the in-cluster/external database swap
+works, which is what Stage 2 consumes.
+
+**`replicas` was removed from `short-deployment.yaml`.** An HPA owns that field; leaving
+both meant every `apply` reset it to 3 and the HPA moved it back.
+
+> `commonLabels` is deprecated in Kustomize v5. Use `labels: [{pairs: {...}, includeSelectors: false}]`.
+> `includeSelectors: false` matters — adding labels to an existing Deployment's
+> **selector** is rejected, because selectors are immutable.
 
 ---
 
-# Part 10 — Stage 1 definition of done
+# Part 10 — Stage 1 definition of done ✅ PASSED
 
 The real test: **delete the cluster and rebuild it from this repo.** If that does
 not work, the repo is incomplete — which is the actual point of the exercise.
@@ -1516,11 +1629,39 @@ kind create cluster --config k8s/kind-cluster.yaml
 # reinstall ingress-nginx, rebuild + kind load images, recreate the Secret, apply -k
 ```
 
-- [ ] one apply against a fresh cluster brings the whole app up healthy
-- [ ] a single hostname serves UI, API and redirects
-- [ ] deleting any application Pod is invisible to the user
-- [ ] a default-deny NetworkPolicy is in force **and proven**
-- [ ] you can explain every field you typed
+- [x] one apply against a fresh cluster brings the whole app up healthy
+- [x] a single hostname serves UI, API and redirects
+- [x] deleting any application Pod is invisible to the user
+- [x] a default-deny NetworkPolicy is in force **and proven**
+- [ ] you can explain every field you typed  <- only you can tick this one
+
+### The rebuild (2026-09-14)
+
+`kind delete cluster` then `powershell -File k8s/bootstrap.ps1`, exit code 0:
+
+```
+3 nodes Ready          ingress controller on shorten-control-plane
+5 pods Running         https 200 / http 308
+register -> shorten -> follow:  302 -> https://kubernetes.io/
+ui -> postgres BLOCKED         short-server -> postgres CONNECTED
+uid 101 / 1000 / 1000          quota rejects an oversized Pod
+metrics-server reporting       HPA cpu: 14%/60%
+deleted a short-server Pod mid-request -> site stayed HTTP 200
+```
+
+### 🔴 The first run FAILED — which is the entire point
+
+Three bugs that only a real teardown could expose:
+
+| Bug | Cause | Fix |
+| --- | --- | --- |
+| both `kubectl patch` calls rejected | PowerShell strips inner `"` when passing JSON to a native exe | `--patch-file k8s/patches/*.json` |
+| `Test-Path : Illegal characters in path` | a `` in the script became a literal backspace | rebuilt the path with `Join-Path` |
+| patch failure was silent | nothing verified the controller's node | the script now **throws** unless it is on `shorten-control-plane` |
+
+**A bootstrap script that has never run against an empty cluster does not work.**
+Pinned `controller-v1.15.1` and `metrics-server v0.9.0` so the next rebuild gets the
+manifests that were actually tested.
 
 Then update [progress.md](progress.md) and move to Stage 2.
 

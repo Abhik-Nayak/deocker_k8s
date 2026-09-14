@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: shorten-defaults
+spec:
+  limits:
+    - type: Container
+      default:                 # injected when a container declares no limits
+        cpu: 500m
+        memory: 256Mi
+      defaultRequest:
+        cpu: 50m
+        memory: 64Mi
+      max:
+        cpu: "2"
+        memory: 1Gi

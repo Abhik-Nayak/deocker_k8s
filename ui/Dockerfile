@@ -12,7 +12,7 @@ COPY . .
 RUN npm run build
 
 # Stage 2 serve React application with Nginx
-FROM nginx:alpine
+FROM nginxinc/nginx-unprivileged:alpine
 
 COPY nginx.conf /etc/nginx/conf.d/default.conf  
 # if you remove ngix.conf from you ui then comment these upper line also beacuse it run you app on 3000 port inside docker else docker run you app on 80 port expose 3000 alsonot work without this upper command
